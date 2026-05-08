@@ -1,4 +1,3 @@
-cat > /teamspace/studios/this_studio/medical-diagnosis-llm-main\ 4/README.md <<'COGNIMED_END'
 ---
 title: CogniMed
 emoji: 🧠
@@ -25,8 +24,7 @@ https://huggingface.co/spaces/Hrishita-P/cognimed
 
 ## Architecture
 
-Question -> S-PubMedBERT encoder -> FAISS retrieval over PubMedQA ->
-BioGPT-Large + LoRA reasoner -> Yes / No / Uncertain verdict with supporting passages.
+Question -> S-PubMedBERT encoder -> FAISS retrieval over PubMedQA -> BioGPT-Large + LoRA reasoner -> Yes / No / Uncertain verdict with supporting passages.
 
 ## Stack
 
@@ -44,8 +42,7 @@ BioGPT-Large + LoRA reasoner -> Yes / No / Uncertain verdict with supporting pas
 
 ## Limitations
 
-CogniMed is calibrated for the PubMedQA evidence-question distribution.
-Out-of-distribution queries are not reliably handled. Not for clinical use.
+CogniMed is calibrated for the PubMedQA evidence-question distribution. Out-of-distribution queries are not reliably handled. Not for clinical use.
 
 ## License
 
@@ -54,4 +51,3 @@ MIT
 ## Author
 
 Hrishita Panjetha
-COGNIMED_END
