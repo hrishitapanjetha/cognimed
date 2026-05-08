@@ -15,21 +15,13 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT      = Path(__file__).parent.parent
 _CHECKPOINT_DIR = _REPO_ROOT / "models" / "checkpoints" / "lora_binary_best"
-_BASE_MODEL_ID  = "microsoft/biogpt-large"   # hidden_size=1600 matches LoRA weights
+_BASE_MODEL_ID  = "microsoft/biogpt-large"
 
 _YES_TOKENS = {"yes", "1", "true"}
 _NO_TOKENS  = {"no",  "0", "false"}
 
 
-# ── Output cleaner ─────────────────────────────────────────────────────────────
-
 def _clean_output(text: str) -> str:
-    """
-    BioGPT was pretrained on raw PubMed XML and sometimes leaks tags like:
-        yes. </FREETEXT> </TITLE>
-        < / FREETEXT > < / TITLE >
-    This strips all such artefacts.
-    """
     text = re.sub(r"<\s*/\s*[A-Za-z_][A-Za-z0-9_]*\s*>", "", text)
     text = re.sub(r"<\s*[A-Za-z_][A-Za-z0-9_]*\s*>", "", text)
     text = re.sub(r"<[^>]{0,50}>", "", text)
@@ -38,12 +30,10 @@ def _clean_output(text: str) -> str:
     return text.strip()
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# LoRA Inference Engine
-# ════════════════════════════════════════════════════════════════════════════
-
 class LoRAInferenceEngine:
     """Loads microsoft/biogpt-large + lora_binary_best and answers yes/no medical questions."""
+
+    CONFIDENCE_MARGIN = 0.15
 
     def __init__(
         self,
@@ -105,10 +95,6 @@ class LoRAInferenceEngine:
 
         self._loaded = True
         logger.info("✅ BioGPT-Large + LoRA adapter loaded successfully.")
-
-    # Minimum normalised P(yes|yes,no) margin from 50% before we'll commit to a verdict.
-    # If both probabilities are within (0.5 - margin, 0.5 + margin) we return UNCERTAIN.
-    CONFIDENCE_MARGIN = 0.15
 
     def answer(self, question: str, context_chunks: Optional[list] = None) -> dict:
         if not self._loaded:
@@ -182,6 +168,29 @@ class LoRAInferenceEngine:
             "emergency":       False,
         }
 
+    def _build_prompt(self, question: str, chunks: Optional[list]) -> str:
+        if chunks:
+            raw_ctx = " ".join(
+                (c["chunk"] if isinstance(c, dict) else str(c)).strip()
+                for c in chunks[:5]
+            )
+            ctx = re.sub(r"\s+", " ", raw_ctx).strip()
+            if len(ctx) > 2000:
+                ctx = ctx[:2000].rstrip()
+            return (
+                "You are a medical expert.\n\n"
+                f"Context: {ctx}\n\n"
+                f"Question: {question.strip()}\n\n"
+                "Answer ONLY yes or no.\n"
+                "Answer: "
+            )
+        return (
+            "You are a medical expert.\n\n"
+            f"Question: {question.strip()}\n\n"
+            "Answer ONLY yes or no.\n"
+            "Answer: "
+        )
+
     def _extract_label(self, text: str) -> str:
         if not text.strip():
             return "UNCERTAIN"
@@ -206,21 +215,13 @@ class LoRAInferenceEngine:
             return "cpu"
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# FAISS Retriever
-# ════════════════════════════════════════════════════════════════════════════
-
 class FAISSRetriever:
-    """
-    Loads your FAISS index from data/index/faiss.index.
-    Tries retrieval/retriever.py first, then manual faiss+embedder fallback.
-    """
+    """Loads the FAISS index from data/index/faiss.index."""
 
     def __init__(self):
         self._retriever  = None
         self._manual     = False
         self._available  = False
-
         self._faiss_index = None
         self._chunks      = None
         self._metadata    = None
