@@ -106,11 +106,16 @@ class LoRAInferenceEngine:
         self._loaded = True
         logger.info("✅ BioGPT-Large + LoRA adapter loaded successfully.")
 
+    # Minimum normalised P(yes|yes,no) margin from 50% before we'll commit to a verdict.
+    # If both probabilities are within (0.5 - margin, 0.5 + margin) we return UNCERTAIN.
+    CONFIDENCE_MARGIN = 0.15
+
     def answer(self, question: str, context_chunks: Optional[list] = None) -> dict:
         if not self._loaded:
             self.load()
 
         import torch
+        import torch.nn.functional as F
         prompt = self._build_prompt(question, context_chunks)
         t0 = time.time()
 
@@ -121,14 +126,44 @@ class LoRAInferenceEngine:
             inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
         with torch.no_grad():
-            output_ids = self.model.generate(
+            gen_out = self.model.generate(
                 **inputs,
                 max_new_tokens=self.max_new_tokens,
                 min_new_tokens=1,
                 do_sample=False,
                 pad_token_id=self.tokenizer.pad_token_id,
                 eos_token_id=self.tokenizer.eos_token_id,
+                output_scores=True,
+                return_dict_in_generate=True,
             )
+
+        output_ids = gen_out.sequences
+
+        first_logits = gen_out.scores[0][0]
+        probs = F.softmax(first_logits, dim=-1)
+
+        def _first_id(word: str):
+            ids = self.tokenizer.encode(word, add_special_tokens=False)
+            return ids[0] if ids else None
+
+        yes_id = _first_id("yes")
+        no_id  = _first_id("no")
+
+        p_yes_raw = float(probs[yes_id].item()) if yes_id is not None else 0.0
+        p_no_raw  = float(probs[no_id].item())  if no_id  is not None else 0.0
+        total = p_yes_raw + p_no_raw
+        if total > 0:
+            p_yes = p_yes_raw / total
+            p_no  = p_no_raw  / total
+        else:
+            p_yes = p_no = 0.5
+
+        if abs(p_yes - 0.5) < self.CONFIDENCE_MARGIN:
+            label = "UNCERTAIN"
+        elif p_yes > p_no:
+            label = "YES"
+        else:
+            label = "NO"
 
         latency_ms = (time.time() - t0) * 1000
         input_len  = inputs["input_ids"].shape[1]
@@ -137,35 +172,15 @@ class LoRAInferenceEngine:
 
         return {
             "answer":          generated,
-            "predicted_label": self._extract_label(generated),
+            "predicted_label": label,
+            "p_yes":           p_yes,
+            "p_no":            p_no,
+            "confidence":      max(p_yes, p_no),
             "latency_ms":      latency_ms,
             "prompt":          prompt,
             "safe":            True,
             "emergency":       False,
         }
-
-    def _build_prompt(self, question: str, chunks: Optional[list]) -> str:
-        if chunks:
-            raw_ctx = " ".join(
-                (c["chunk"] if isinstance(c, dict) else str(c)).strip()
-                for c in chunks[:5]
-            )
-            ctx = re.sub(r"\s+", " ", raw_ctx).strip()
-            if len(ctx) > 2000:
-                ctx = ctx[:2000].rstrip()
-            return (
-                "You are a medical expert.\n\n"
-                f"Context: {ctx}\n\n"
-                f"Question: {question.strip()}\n\n"
-                "Answer ONLY yes or no.\n"
-                "Answer: "
-            )
-        return (
-            "You are a medical expert.\n\n"
-            f"Question: {question.strip()}\n\n"
-            "Answer ONLY yes or no.\n"
-            "Answer: "
-        )
 
     def _extract_label(self, text: str) -> str:
         if not text.strip():
