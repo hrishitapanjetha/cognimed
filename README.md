@@ -33,14 +33,8 @@ Question -> S-PubMedBERT encoder -> FAISS retrieval over PubMedQA -> BioGPT-Larg
 - UI: Gradio with a beige palette
 - Trained on the binary yes / no subset of PubMedQA
 
-## Run Locally
 
-    git clone https://github.com/hrishitapanjetha/cognimed.git
-    cd cognimed
-    pip install -r requirements.txt
-    python app.py
-
-## Limitations
+## Warning
 
 CogniMed is calibrated for the PubMedQA evidence-question distribution. Out-of-distribution queries are not reliably handled. Not for clinical use.
 
