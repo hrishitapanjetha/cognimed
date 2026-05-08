@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.gradio/
+.DS_Store
+.ipynb_checkpoints/
+
+# Excluded from Space deployment (not needed at runtime)
+evaluation/
+paper/
+results/
+scripts/
+pipeline/
+run.py
+data/pubmedqa/
